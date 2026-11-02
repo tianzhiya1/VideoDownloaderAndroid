@@ -300,7 +300,7 @@ class MainActivity : Activity() {
     private fun findMedia(page: String): String? {
         val html = requestText(page)
         val pattern = Regex(
-            """https?://[^"'\\s<>]+?\\.(?:mp4|m4v|mov|webm|mkv|avi|flv|3gp|ts|mpeg|mpg|wmv|ogv|mts|m2ts|m3u8|mpd)(?:\\?[^"'\\s<>]*)?""",
+            """https?://[^"'\s<>]+?\.(?:mp4|m4v|mov|webm|mkv|avi|flv|3gp|ts|mpeg|mpg|wmv|ogv|mts|m2ts|m3u8|mpd)(?:\?[^"'\s<>]*)?""",
             RegexOption.IGNORE_CASE
         )
         return pattern.findAll(html).map { it.value.replace("&amp;", "&") }
@@ -400,7 +400,7 @@ private class Mp4BrowserServer {
                         end = match.groupValues[2].toLongOrNull()?.coerceAtMost(total - 1) ?: (total - 1)
                         if (start > end || start >= total) {
                             val out = client.getOutputStream()
-                            out.write("HTTP/1.1 416 Range Not Satisfiable\\r\\nContent-Range: bytes */$total\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII))
+                            out.write("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */$total\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray(Charsets.US_ASCII))
                             out.flush()
                             return
                         }
@@ -409,14 +409,14 @@ private class Mp4BrowserServer {
                 }
                 val length = end - start + 1
                 val headers = buildString {
-                    append("HTTP/1.1 $status\\r\\n")
-                    append("Content-Type: video/mp4\\r\\n")
-                    append("Content-Disposition: attachment; filename=video.mp4\\r\\n")
-                    append("Accept-Ranges: bytes\\r\\n")
-                    if (status.startsWith("206")) append("Content-Range: bytes $start-$end/$total\\r\\n")
-                    append("Content-Length: $length\\r\\n")
-                    append("Cache-Control: no-store\\r\\n")
-                    append("Connection: close\\r\\n\\r\\n")
+                    append("HTTP/1.1 $status\r\n")
+                    append("Content-Type: video/mp4\r\n")
+                    append("Content-Disposition: attachment; filename=video.mp4\r\n")
+                    append("Accept-Ranges: bytes\r\n")
+                    if (status.startsWith("206")) append("Content-Range: bytes $start-$end/$total\r\n")
+                    append("Content-Length: $length\r\n")
+                    append("Cache-Control: no-store\r\n")
+                    append("Connection: close\r\n\r\n")
                 }
                 val output = BufferedOutputStream(client.getOutputStream())
                 output.write(headers.toByteArray(Charsets.US_ASCII))
@@ -443,7 +443,7 @@ private class Mp4BrowserServer {
     private fun respond(socket: java.net.Socket, status: String, type: String, body: String) {
         val bytes = body.toByteArray(Charsets.UTF_8)
         val output = socket.getOutputStream()
-        val header = "HTTP/1.1 $status\\r\\nContent-Type: $type\\r\\nContent-Length: ${bytes.size}\\r\\nConnection: close\\r\\n\\r\\n"
+        val header = "HTTP/1.1 $status\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
         output.write(header.toByteArray(Charsets.US_ASCII))
         output.write(bytes)
         output.flush()
