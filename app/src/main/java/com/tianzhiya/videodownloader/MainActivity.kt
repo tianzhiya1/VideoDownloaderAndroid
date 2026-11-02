@@ -58,7 +58,6 @@ class MainActivity : Activity() {
         urlInput = EditText(this).apply {
             hint = "https://example.com/video-page"
             inputType = android.text.InputType.TYPE_TEXT_VARIATION_URI
-            singleLine = false
             minLines = 2
         }
         val start = Button(this).apply {
