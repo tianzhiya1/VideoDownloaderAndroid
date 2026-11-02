@@ -36,6 +36,8 @@ class MainActivity : Activity() {
     private lateinit var progress: ProgressBar
     private lateinit var webView: WebView
     private lateinit var mediaContainer: LinearLayout
+    private lateinit var browserDownloadButton: Button
+    private var selectedMediaAddress: String? = null
     private val capturedMedia = ConcurrentHashMap<String, Map<String, String>>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,7 +84,9 @@ class MainActivity : Activity() {
                 val page = urlInput.text.toString().trim()
                 if (page.startsWith("https://") || page.startsWith("http://")) {
                     capturedMedia.clear()
+                    selectedMediaAddress = null
                     mediaContainer.removeAllViews()
+                    browserDownloadButton.isEnabled = false
                     webView.visibility = android.view.View.VISIBLE
                     status.text = "正在应用内加载网页，检测公开 MP4/M3U8 请求…"
                     webView.loadUrl(page)
@@ -118,6 +122,18 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 8, 0, 8)
         }
+        browserDownloadButton = Button(this).apply {
+            text = "用浏览器下载视频"
+            isEnabled = false
+            setOnClickListener {
+                val address = selectedMediaAddress
+                if (address.isNullOrBlank()) {
+                    status.text = "还没有检测到可下载的视频"
+                } else {
+                    openInBrowserForDownload(address)
+                }
+            }
+        }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
             visibility = android.view.View.GONE
@@ -134,6 +150,7 @@ class MainActivity : Activity() {
         root.addView(openBrowser)
         root.addView(webView, ViewGroup.LayoutParams.MATCH_PARENT, 620)
         root.addView(mediaContainer)
+        root.addView(browserDownloadButton)
         root.addView(progress, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(status)
         setContentView(ScrollView(this).apply { addView(root) })
@@ -190,28 +207,34 @@ class MainActivity : Activity() {
     private fun isMediaUrl(value: String): Boolean = mediaKind(value).isNotEmpty()
 
     private fun addMediaCandidate(address: String) {
-        if (mediaContainer.childCount > 30 || mediaContainer.findViewWithTag<android.view.View>(address) != null) return
         val kind = mediaKind(address)
-        val isHls = kind == "HLS"
-        val isDash = kind == "DASH"
-        val item = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 6, 0, 6)
+        if (kind.isEmpty()) return
+
+        // Keep one download action for the whole page. Prefer a direct MP4 when
+        // available; otherwise keep a supported stream candidate for processing.
+        val current = selectedMediaAddress
+        val currentKind = current?.let { mediaKind(it) } ?: ""
+        val priority = mapOf("视频文件" to 1, "DASH" to 2, "HLS" to 3)
+        if (current == null || (priority[kind] ?: 99) < (priority[currentKind] ?: 99)) {
+            selectedMediaAddress = address
         }
-        val label = TextView(this).apply {
-            text = "检测到 $kind：${address.take(100)}"
-            textSize = 12f
+
+        if (mediaContainer.findViewWithTag<android.view.View>(address) == null && mediaContainer.childCount < 30) {
+            val label = TextView(this).apply {
+                text = "检测到 $kind：${address.take(100)}"
+                textSize = 12f
+            }
+            label.tag = address
+            mediaContainer.addView(label)
         }
-        item.tag = address
-        item.addView(label)
-        val headers = capturedMedia[address] ?: emptyMap()
-        item.addView(Button(this).apply {
-            text = if (isHls) "在浏览器下载 HLS 视频（基础 TS 流）" else if (isDash) "DASH 流暂不支持合并下载" else "在手机浏览器下载视频"
-            isEnabled = !isDash
-            setOnClickListener { openInBrowserForDownload(address) }
-        })
-        mediaContainer.addView(item)
-        status.text = "已检测到 ${mediaContainer.childCount} 个媒体地址，请选择下载方式"
+
+        browserDownloadButton.isEnabled = selectedMediaAddress != null
+        browserDownloadButton.text = if (selectedMediaAddress != null) {
+            "用浏览器下载视频（已识别 ${capturedMedia.size.coerceAtLeast(mediaContainer.childCount)} 个候选）"
+        } else {
+            "用浏览器下载视频"
+        }
+        status.text = "已识别媒体地址。页面只保留一个浏览器下载按钮。"
     }
 
     private fun openInBrowserForDownload(address: String) {
