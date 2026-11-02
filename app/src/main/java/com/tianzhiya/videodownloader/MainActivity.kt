@@ -13,6 +13,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import android.webkit.CookieManager
@@ -130,7 +131,7 @@ class MainActivity : Activity() {
         root.addView(mediaContainer)
         root.addView(progress, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(status)
-        setContentView(root)
+        setContentView(ScrollView(this).apply { addView(root) })
     }
 
     private fun handleIntent(intent: Intent?) {
