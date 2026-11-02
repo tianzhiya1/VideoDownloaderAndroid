@@ -213,9 +213,17 @@ class MainActivity : Activity() {
         // Keep one download action for the whole page. Prefer a direct MP4 when
         // available; otherwise keep a supported stream candidate for processing.
         val current = selectedMediaAddress
-        val currentKind = current?.let { mediaKind(it) } ?: ""
-        val priority = mapOf("视频文件" to 1, "DASH" to 2, "HLS" to 3)
-        if (current == null || (priority[kind] ?: 99) < (priority[currentKind] ?: 99)) {
+        fun priority(value: String): Int {
+            val clean = value.substringBefore('?').substringBefore('#').lowercase()
+            return when {
+                clean.endsWith(".mp4") -> 0
+                mediaKind(value) == "视频文件" -> 1
+                mediaKind(value) == "HLS" -> 2
+                mediaKind(value) == "DASH" -> 3
+                else -> 99
+            }
+        }
+        if (current == null || priority(address) < priority(current)) {
             selectedMediaAddress = address
         }
 
