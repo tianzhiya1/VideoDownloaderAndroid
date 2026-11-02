@@ -6,7 +6,7 @@
         android:allowBackup="true"
         android:label="视频下载器"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize"
