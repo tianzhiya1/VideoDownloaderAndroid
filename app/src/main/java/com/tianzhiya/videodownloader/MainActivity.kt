@@ -129,7 +129,7 @@ class MainActivity : Activity() {
 
     private fun findMedia(page: String): String? {
         val html = requestText(page)
-        val pattern = Regex("""https?://[^"'\\s<>]+?\\.(?:mp4|m3u8)(?:\\?[^"'\\s<>]*)?""", RegexOption.IGNORE_CASE)
+        val pattern = Regex("""https?://[^"'\s<>]+?\.(?:mp4|m3u8)(?:\?[^"'\s<>]*)?""", RegexOption.IGNORE_CASE)
         return pattern.findAll(html)
             .map { it.value.replace("&amp;", "&") }
             .firstOrNull()
@@ -175,7 +175,7 @@ class MainActivity : Activity() {
                     for (line in lines) {
                         val trimmed = line.trim()
                         if (trimmed.startsWith("#EXT-X-STREAM-INF")) {
-                            bandwidth = Regex("""BANDWIDTH=(\\d+)""").find(trimmed)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                            bandwidth = Regex("""BANDWIDTH=(\d+)""").find(trimmed)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
                         } else if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
                             variants += bandwidth to URL(playlistUrl, trimmed).toString()
                             bandwidth = 0L
