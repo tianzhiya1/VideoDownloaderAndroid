@@ -112,6 +112,18 @@ class MainActivity : Activity() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     runOnUiThread { status.text = "网页已打开，正在监听媒体请求…" }
+                    if (!url.isNullOrBlank() && isBilibiliPage(url)) {
+                        executor.execute {
+                            try {
+                                val direct = resolveBilibiliMp4(url)
+                                if (!direct.isNullOrBlank()) {
+                                    runOnUiThread { addMediaCandidate(direct) }
+                                }
+                            } catch (_: Exception) {
+                                // Keep normal WebView media interception as a fallback.
+                            }
+                        }
+                    }
                 }
 
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): android.webkit.WebResourceResponse? {
@@ -186,7 +198,7 @@ class MainActivity : Activity() {
         status.text = "正在分析网页…"
         executor.execute {
             try {
-                val media = if (isMediaUrl(page)) page else findMedia(page)
+                val media = if (isMediaUrl(page)) page else resolveBilibiliMp4(page) ?: findMedia(page)
                 runOnUiThread {
                     progress.visibility = View.GONE
                     if (media == null) {
@@ -216,6 +228,47 @@ class MainActivity : Activity() {
     }
 
     private fun isMediaUrl(value: String): Boolean = mediaKind(value).isNotEmpty()
+
+    private fun isMp4Url(value: String): Boolean {
+        val path = Uri.parse(value).path.orEmpty().lowercase()
+        return path.endsWith(".mp4") || path.endsWith(".m4v")
+    }
+
+    private fun isBilibiliPage(value: String): Boolean {
+        val host = Uri.parse(value).host?.lowercase().orEmpty()
+        return host == "bilibili.com" || host.endsWith(".bilibili.com") ||
+            host == "b23.tv" || host.endsWith(".b23.tv")
+    }
+
+    /**
+     * Resolve a Bilibili video page to its current signed MP4 URL.
+     * The signed URL changes/expires, so it is fetched at download time.
+     * fnval=0 requests the durl/MP4 response.
+     */
+    private fun resolveBilibiliMp4(page: String): String? {
+        if (!isBilibiliPage(page)) return null
+        val bvid = Regex("""BV[0-9A-Za-z]{10}""").find(page)?.value ?: return null
+        val referer = "https://www.bilibili.com/video/$bvid"
+        val viewText = requestText(
+            "https://api.bilibili.com/x/web-interface/view?bvid=$bvid",
+            referer
+        )
+        val viewJson = org.json.JSONObject(viewText)
+        if (viewJson.optInt("code", -1) != 0) return null
+        val viewData = viewJson.optJSONObject("data") ?: return null
+        val cid = viewData.optLong("cid", 0L)
+        if (cid <= 0L) return null
+
+        val playUrl = "https://api.bilibili.com/x/player/playurl" +
+            "?bvid=$bvid&cid=$cid&qn=80&fnver=0&fnval=0&fourk=1&platform=html5&otype=json"
+        val playText = requestText(playUrl, referer)
+        val playJson = org.json.JSONObject(playText)
+        if (playJson.optInt("code", -1) != 0) return null
+        val data = playJson.optJSONObject("data") ?: return null
+        val segments = data.optJSONArray("durl") ?: return null
+        if (segments.length() == 0) return null
+        return segments.optJSONObject(0)?.optString("url")?.takeIf { it.startsWith("https://") }
+    }
 
     private fun candidatePriority(value: String): Int {
         val clean = value.substringBefore('?').substringBefore('#').lowercase()
@@ -284,6 +337,26 @@ class MainActivity : Activity() {
         converting = true
         downloadButton.isEnabled = false
         progress.visibility = View.VISIBLE
+        // A real MP4 URL should be passed straight to the browser. Re-wrapping it
+        // through the app's loopback server can produce a blank page in some browsers.
+        if (isMp4Url(address)) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(address))
+                    .addCategory(Intent.CATEGORY_BROWSABLE)
+                startActivity(intent)
+                converting = false
+                progress.visibility = View.GONE
+                status.text = "已提取到 MP4 原始直链，正在交给浏览器打开下载。下载完成后返回应用选择下一个视频。"
+                downloadButton.isEnabled = selectedMediaAddress != null
+            } catch (_: Exception) {
+                converting = false
+                progress.visibility = View.GONE
+                status.text = "MP4 直链已提取，但无法打开浏览器。"
+                downloadButton.isEnabled = selectedMediaAddress != null
+            }
+            return
+        }
+
         status.text = "正在将媒体转换为 MP4。视频较长时需要等待，请保持应用在后台运行…"
 
         val folder = getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: filesDir
@@ -343,13 +416,16 @@ class MainActivity : Activity() {
             .sortedBy { candidatePriority(it) }.firstOrNull()
     }
 
-    private fun requestText(address: String): String {
+    private fun requestText(address: String, referer: String? = null): String {
         val connection = URL(address).openConnection() as HttpURLConnection
         try {
             connection.connectTimeout = 15000
             connection.readTimeout = 20000
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Android) VideoDownloader/1.1")
-            CookieManager.getInstance().getCookie(address)?.let { connection.setRequestProperty("Cookie", it) }
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36")
+            connection.setRequestProperty("Accept", "*/*")
+            referer?.let { connection.setRequestProperty("Referer", it) }
+            val cookie = CookieManager.getInstance().getCookie(referer ?: address)
+            if (!cookie.isNullOrBlank()) connection.setRequestProperty("Cookie", cookie)
             return connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         } finally {
             connection.disconnect()
