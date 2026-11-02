@@ -101,7 +101,6 @@ class MainActivity : Activity() {
                         val headers = mutableMapOf<String, String>()
                         request.requestHeaders["Referer"]?.let { headers["Referer"] = it }
                         request.requestHeaders["User-Agent"]?.let { headers["User-Agent"] = it }
-                        CookieManager.getInstance().getCookie(address)?.let { headers["Cookie"] = it }
                         capturedMedia[address] = headers
                         runOnUiThread { addMediaCandidate(address) }
                     }
@@ -209,6 +208,7 @@ class MainActivity : Activity() {
         connection.readTimeout = 20000
         connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Android) VideoDownloader/1.0")
         headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+        CookieManager.getInstance().getCookie(address)?.let { connection.setRequestProperty("Cookie", it) }
         return connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             .also { connection.disconnect() }
     }
@@ -224,6 +224,7 @@ class MainActivity : Activity() {
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
             headers.forEach { (key, value) -> request.addRequestHeader(key, value) }
+            CookieManager.getInstance().getCookie(address)?.let { request.addRequestHeader("Cookie", it) }
             val id = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
             progress.visibility = android.view.View.GONE
             status.text = "已加入系统下载队列（任务编号：$id），可在通知栏查看进度。"
@@ -272,6 +273,7 @@ class MainActivity : Activity() {
                         connection.readTimeout = 30000
                         connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Android) VideoDownloader/1.0")
                         headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+                        CookieManager.getInstance().getCookie(segment.toString())?.let { connection.setRequestProperty("Cookie", it) }
                         BufferedInputStream(connection.inputStream).use { input -> input.copyTo(out) }
                         connection.disconnect()
                         runOnUiThread { status.text = "正在下载 HLS 分片：${index + 1}/${segments.size}" }
