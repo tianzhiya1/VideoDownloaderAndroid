@@ -15,6 +15,11 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import java.util.concurrent.ConcurrentHashMap
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -27,6 +32,9 @@ class MainActivity : Activity() {
     private lateinit var urlInput: EditText
     private lateinit var status: TextView
     private lateinit var progress: ProgressBar
+    private lateinit var webView: WebView
+    private lateinit var mediaContainer: LinearLayout
+    private val capturedMedia = ConcurrentHashMap<String, Map<String, String>>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,8 +69,49 @@ class MainActivity : Activity() {
             minLines = 2
         }
         val start = Button(this).apply {
-            text = "识别并下载"
+            text = "识别网页源码"
             setOnClickListener { startDetection(urlInput.text.toString().trim()) }
+        }
+        val openBrowser = Button(this).apply {
+            text = "在应用内打开网页并检测动态视频"
+            setOnClickListener {
+                val page = urlInput.text.toString().trim()
+                if (page.startsWith("https://") || page.startsWith("http://")) {
+                    webView.visibility = android.view.View.VISIBLE
+                    status.text = "正在应用内加载网页，检测公开 MP4/M3U8 请求…"
+                    webView.loadUrl(page)
+                } else {
+                    status.text = "请先输入有效的网页链接"
+                }
+            }
+        }
+        webView = WebView(this).apply {
+            visibility = android.view.View.GONE
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    runOnUiThread { status.text = "网页已打开，正在监听公开媒体请求…" }
+                }
+
+                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): android.webkit.WebResourceResponse? {
+                    val address = request?.url?.toString() ?: return null
+                    if (isMediaUrl(address)) {
+                        val headers = mutableMapOf<String, String>()
+                        request.requestHeaders["Referer"]?.let { headers["Referer"] = it }
+                        request.requestHeaders["User-Agent"]?.let { headers["User-Agent"] = it }
+                        CookieManager.getInstance().getCookie(address)?.let { headers["Cookie"] = it }
+                        capturedMedia[address] = headers
+                        runOnUiThread { addMediaCandidate(address) }
+                    }
+                    return null
+                }
+            }
+        }
+        mediaContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 8, 0, 8)
         }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = true
@@ -77,6 +126,9 @@ class MainActivity : Activity() {
         root.addView(intro)
         root.addView(urlInput, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(start)
+        root.addView(openBrowser)
+        root.addView(webView, ViewGroup.LayoutParams.MATCH_PARENT, 620)
+        root.addView(mediaContainer)
         root.addView(progress, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         root.addView(status)
         setContentView(root)
@@ -126,6 +178,23 @@ class MainActivity : Activity() {
         return clean.endsWith(".mp4", true) || clean.endsWith(".m3u8", true)
     }
 
+    private fun addMediaCandidate(address: String) {
+        if (mediaContainer.childCount > 30 || mediaContainer.findViewWithTag<android.view.View>(address) != null) return
+        val button = Button(this).apply {
+            tag = address
+            text = "下载检测到的媒体：${address.take(90)}"
+            textSize = 12f
+            setOnClickListener {
+                val headers = capturedMedia[address] ?: emptyMap()
+                status.text = "准备下载检测到的媒体…"
+                if (address.substringBefore('?').endsWith(".m3u8", true)) downloadHls(address, headers)
+                else downloadMp4(address, headers)
+            }
+        }
+        mediaContainer.addView(button)
+        status.text = "已检测到 ${capturedMedia.size} 个公开媒体地址，请选择要下载的项目"
+    }
+
     private fun findMedia(page: String): String? {
         val html = requestText(page)
         val pattern = Regex("""https?://[^"'\s<>]+?\.(?:mp4|m3u8)(?:\?[^"'\s<>]*)?""", RegexOption.IGNORE_CASE)
@@ -134,16 +203,17 @@ class MainActivity : Activity() {
             .firstOrNull()
     }
 
-    private fun requestText(address: String): String {
+    private fun requestText(address: String, headers: Map<String, String> = emptyMap()): String {
         val connection = URL(address).openConnection() as HttpURLConnection
         connection.connectTimeout = 15000
         connection.readTimeout = 20000
         connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Android) VideoDownloader/1.0")
+        headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
         return connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             .also { connection.disconnect() }
     }
 
-    private fun downloadMp4(address: String) {
+    private fun downloadMp4(address: String, headers: Map<String, String> = emptyMap()) {
         try {
             val name = "video_${System.currentTimeMillis()}.mp4"
             val request = DownloadManager.Request(Uri.parse(address))
@@ -153,6 +223,7 @@ class MainActivity : Activity() {
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(false)
+            headers.forEach { (key, value) -> request.addRequestHeader(key, value) }
             val id = (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
             progress.visibility = android.view.View.GONE
             status.text = "已加入系统下载队列（任务编号：$id），可在通知栏查看进度。"
@@ -162,11 +233,11 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun downloadHls(address: String) {
+    private fun downloadHls(address: String, headers: Map<String, String> = emptyMap()) {
         executor.execute {
             try {
                 var playlistUrl = URL(address)
-                var playlist = requestText(playlistUrl.toString())
+                var playlist = requestText(playlistUrl.toString(), headers)
                 if (playlist.contains("#EXT-X-STREAM-INF")) {
                     val lines = playlist.lines()
                     val variants = mutableListOf<Pair<Long, String>>()
@@ -182,7 +253,7 @@ class MainActivity : Activity() {
                     }
                     playlistUrl = URL(variants.maxByOrNull { it.first }?.second
                         ?: error("主播放列表中没有可用画质"))
-                    playlist = requestText(playlistUrl.toString())
+                    playlist = requestText(playlistUrl.toString(), headers)
                 }
                 val keyLine = playlist.lines().firstOrNull { it.trim().startsWith("#EXT-X-KEY") }
                 if (keyLine != null && !keyLine.contains("METHOD=NONE")) {
@@ -200,6 +271,7 @@ class MainActivity : Activity() {
                         connection.connectTimeout = 15000
                         connection.readTimeout = 30000
                         connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Android) VideoDownloader/1.0")
+                        headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
                         BufferedInputStream(connection.inputStream).use { input -> input.copyTo(out) }
                         connection.disconnect()
                         runOnUiThread { status.text = "正在下载 HLS 分片：${index + 1}/${segments.size}" }
@@ -220,6 +292,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        webView.destroy()
         executor.shutdown()
         super.onDestroy()
     }
