@@ -60,7 +60,7 @@ class MainActivity : Activity() {
             textSize = 26f
         }
         val intro = TextView(this).apply {
-            text = "粘贴网页链接，或从浏览器使用“分享”发送到本应用。仅支持页面公开暴露且你有权下载的媒体。"
+            text = "粘贴网页链接，或从浏览器使用“分享”发送到本应用。仅支持页面公开暴露且你有权下载的媒体文件。"
             textSize = 14f
             setPadding(0, 12, 0, 20)
         }
@@ -70,14 +70,16 @@ class MainActivity : Activity() {
             minLines = 2
         }
         val start = Button(this).apply {
-            text = "识别网页源码"
+            text = "识别网页源码中的直链"
             setOnClickListener { startDetection(urlInput.text.toString().trim()) }
         }
         val openBrowser = Button(this).apply {
-            text = "在应用内打开网页并检测动态视频"
+            text = "应用内打开网页并检测视频"
             setOnClickListener {
                 val page = urlInput.text.toString().trim()
                 if (page.startsWith("https://") || page.startsWith("http://")) {
+                    capturedMedia.clear()
+                    mediaContainer.removeAllViews()
                     webView.visibility = android.view.View.VISIBLE
                     status.text = "正在应用内加载网页，检测公开 MP4/M3U8 请求…"
                     webView.loadUrl(page)
@@ -155,13 +157,12 @@ class MainActivity : Activity() {
             try {
                 val media = if (isMediaUrl(page)) page else findMedia(page)
                 runOnUiThread {
+                    progress.visibility = android.view.View.GONE
                     if (media == null) {
-                        progress.visibility = android.view.View.GONE
-                        status.text = "没有找到可直接访问的 MP4 或 M3U8。部分动态播放器无法通过网页源码识别。"
+                        status.text = "没有找到可直接访问的 MP4 或 M3U8。动态播放器请使用下面的“应用内打开网页并检测视频”。"
                     } else {
-                        status.text = "找到媒体：$media"
-                        if (media.substringBefore('?').endsWith(".m3u8", true)) downloadHls(media)
-                        else downloadMp4(media)
+                        status.text = "找到媒体直链：$media"
+                        addMediaCandidate(media)
                     }
                 }
             } catch (e: Exception) {
@@ -180,24 +181,50 @@ class MainActivity : Activity() {
 
     private fun addMediaCandidate(address: String) {
         if (mediaContainer.childCount > 30 || mediaContainer.findViewWithTag<android.view.View>(address) != null) return
-        val button = Button(this).apply {
-            tag = address
-            text = "下载检测到的媒体：${address.take(90)}"
-            textSize = 12f
-            setOnClickListener {
-                val headers = capturedMedia[address] ?: emptyMap()
-                status.text = "准备下载检测到的媒体…"
-                if (address.substringBefore('?').endsWith(".m3u8", true)) downloadHls(address, headers)
-                else downloadMp4(address, headers)
-            }
+        val isHls = address.substringBefore('?').substringBefore('#').endsWith(".m3u8", true)
+        val item = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 6, 0, 6)
         }
-        mediaContainer.addView(button)
-        status.text = "已检测到 ${capturedMedia.size} 个公开媒体地址，请选择要下载的项目"
+        val label = TextView(this).apply {
+            text = if (isHls) "检测到 HLS 播放列表：${address.take(100)}" else "检测到 MP4 视频：${address.take(100)}"
+            textSize = 12f
+        }
+        item.tag = address
+        item.addView(label)
+        val headers = capturedMedia[address] ?: emptyMap()
+        if (!isHls) {
+            item.addView(Button(this).apply {
+                text = "交给手机浏览器下载 MP4"
+                setOnClickListener { openInBrowserForDownload(address) }
+            })
+        }
+        item.addView(Button(this).apply {
+            text = if (isHls) "在应用内下载 HLS" else "使用应用内下载 MP4"
+            setOnClickListener {
+                status.text = "准备应用内下载…"
+                if (isHls) downloadHls(address, headers) else downloadMp4(address, headers)
+            }
+        })
+        mediaContainer.addView(item)
+        status.text = "已检测到 ${mediaContainer.childCount} 个媒体地址，请选择下载方式"
+    }
+
+    private fun openInBrowserForDownload(address: String) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(address)).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+            }
+            startActivity(Intent.createChooser(intent, "选择浏览器下载视频"))
+            status.text = "已交给浏览器打开。若浏览器直接播放而不是下载，请长按视频或使用浏览器的下载功能。"
+        } catch (e: Exception) {
+            status.text = "无法打开浏览器：${e.message ?: "未找到可用浏览器"}"
+        }
     }
 
     private fun findMedia(page: String): String? {
         val html = requestText(page)
-        val pattern = Regex("""https?://[^"'\s<>]+?\.(?:mp4|m3u8)(?:\?[^"'\s<>]*)?""", RegexOption.IGNORE_CASE)
+        val pattern = Regex("""https?://[^"'\\s<>]+?\\.(?:mp4|m3u8)(?:\\?[^"'\\s<>]*)?""", RegexOption.IGNORE_CASE)
         return pattern.findAll(html)
             .map { it.value.replace("&amp;", "&") }
             .firstOrNull()
@@ -247,7 +274,7 @@ class MainActivity : Activity() {
                     for (line in lines) {
                         val trimmed = line.trim()
                         if (trimmed.startsWith("#EXT-X-STREAM-INF")) {
-                            bandwidth = Regex("""BANDWIDTH=(\d+)""").find(trimmed)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                            bandwidth = Regex("""BANDWIDTH=(\\d+)""").find(trimmed)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
                         } else if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
                             variants += bandwidth to URL(playlistUrl, trimmed).toString()
                             bandwidth = 0L
