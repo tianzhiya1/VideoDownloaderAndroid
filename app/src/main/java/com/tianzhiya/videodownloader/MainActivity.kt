@@ -483,7 +483,7 @@ private class BrowserDownloadServer(private val context: Context) {
                 for (line in lines) {
                     val t = line.trim()
                     if (t.startsWith("#EXT-X-STREAM-INF")) {
-                        pending = Regex("""BANDWIDTH=(\\d+)""").find(t)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                        pending = Regex("""BANDWIDTH=(\d+)""").find(t)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
                     } else if (t.isNotEmpty() && !t.startsWith("#")) {
                         if (pending > bestBandwidth) { bestBandwidth = pending; selected = t }
                     }
@@ -507,7 +507,7 @@ private class BrowserDownloadServer(private val context: Context) {
                 return
             }
             val output = client.getOutputStream()
-            val header = "HTTP/1.1 200 OK\\r\\nContent-Type: video/mp2t\\r\\nContent-Disposition: attachment; filename=video.ts\\r\\nCache-Control: no-store\\r\\nConnection: close\\r\\n\\r\\n"
+            val header = "HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nContent-Disposition: attachment; filename=video.ts\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
             output.write(header.toByteArray(Charsets.US_ASCII))
             if (initUrl != null) open(initUrl).let { c -> c.inputStream.use { it.copyTo(output, 64 * 1024) }; c.disconnect() }
             segments.forEach { segment ->
