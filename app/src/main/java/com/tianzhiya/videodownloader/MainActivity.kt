@@ -1,6 +1,9 @@
 package com.tianzhiya.videodownloader
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -14,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -76,7 +80,7 @@ class MainActivity : Activity() {
             textSize = 26f
         })
         root.addView(TextView(this).apply {
-            text = "粘贴网页链接，或从浏览器分享网页到本应用。识别到媒体后，应用会将可解码的视频转换为 MP4，再交给手机浏览器下载。"
+            text = "粘贴网页链接并在应用内打开。识别到真实视频地址后，可在应用内查看并复制链接，不会自动跳转浏览器。"
             textSize = 14f
             setPadding(0, 12, 0, 20)
         })
@@ -111,7 +115,7 @@ class MainActivity : Activity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    runOnUiThread { status.text = "网页已打开，正在监听媒体请求…" }
+                    runOnUiThread { status.text = "网页已打开。请在播放器中点播放，应用会监听实际媒体请求；识别到链接后可在下方点选并复制。" }
                     if (!url.isNullOrBlank() && isBilibiliPage(url)) {
                         executor.execute {
                             try {
@@ -146,7 +150,7 @@ class MainActivity : Activity() {
         }
         root.addView(mediaContainer)
         downloadButton = Button(this).apply {
-            text = "转换为 MP4 并用浏览器下载"
+            text = "复制所选视频链接"
             isEnabled = false
             setOnClickListener { convertThenOpenBrowser() }
         }
@@ -185,7 +189,7 @@ class MainActivity : Activity() {
         candidateViews.clear()
         mediaContainer.removeAllViews()
         downloadButton.isEnabled = false
-        downloadButton.text = "转换为 MP4 并用浏览器下载"
+        downloadButton.text = "复制所选视频链接"
     }
 
     private fun startDetection(page: String) {
@@ -218,11 +222,12 @@ class MainActivity : Activity() {
 
     private fun mediaKind(value: String): String {
         val clean = value.substringBefore('?').substringBefore('#').lowercase()
+        val full = value.lowercase()
         return when {
-            clean.endsWith(".m3u8") -> "HLS / M3U8"
-            clean.endsWith(".mpd") -> "DASH / MPD"
+            clean.endsWith(".m3u8") || full.contains(".m3u8") -> "HLS / M3U8"
+            clean.endsWith(".mpd") || full.contains(".mpd") -> "DASH / MPD"
             listOf(".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".flv", ".3gp", ".ts", ".mpeg", ".mpg", ".wmv", ".ogv", ".mts", ".m2ts")
-                .any { clean.endsWith(it) } -> "视频文件"
+                .any { clean.endsWith(it) || full.contains("$it?") } -> "视频文件"
             else -> ""
         }
     }
@@ -307,7 +312,7 @@ class MainActivity : Activity() {
                     manuallySelected = true
                     selectedMediaAddress = address
                     refreshCandidateSelection()
-                    status.text = "已选择这个视频。点击下面唯一的按钮，只转换并下载这个视频。"
+                    status.text = "已选择这个视频。点击下面唯一的按钮，在弹窗中查看并复制它的真实媒体链接。"
                 }
             }
             candidateViews[address] = row
@@ -315,9 +320,9 @@ class MainActivity : Activity() {
         }
         refreshCandidateSelection()
         downloadButton.isEnabled = !converting && selectedMediaAddress != null
-        downloadButton.text = "转换所选视频为 MP4 并用浏览器下载（共识别 ${candidateViews.size} 个）"
+        downloadButton.text = "复制所选视频链接（共识别 ${candidateViews.size} 个）"
         if (!manuallySelected) {
-            status.text = "已自动选中优先级较高的视频。你也可以点选列表中的任意一个，再用同一个按钮单独转换。"
+            status.text = "已自动选中优先级较高的视频。你也可以点选列表中的任意一个，再用同一个按钮复制链接。"
         }
     }
 
@@ -334,76 +339,34 @@ class MainActivity : Activity() {
     private fun convertThenOpenBrowser() {
         val address = selectedMediaAddress
         if (address.isNullOrBlank() || converting) return
-        converting = true
-        downloadButton.isEnabled = false
-        progress.visibility = View.VISIBLE
-        // A real MP4 URL should be passed straight to the browser. Re-wrapping it
-        // through the app's loopback server can produce a blank page in some browsers.
-        if (isMp4Url(address)) {
-            try {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(address))
-                    .addCategory(Intent.CATEGORY_BROWSABLE)
-                startActivity(intent)
-                converting = false
-                progress.visibility = View.GONE
-                status.text = "已提取到 MP4 原始直链，正在交给浏览器打开下载。下载完成后返回应用选择下一个视频。"
-                downloadButton.isEnabled = selectedMediaAddress != null
-            } catch (_: Exception) {
-                converting = false
-                progress.visibility = View.GONE
-                status.text = "MP4 直链已提取，但无法打开浏览器。"
-                downloadButton.isEnabled = selectedMediaAddress != null
-            }
-            return
+        showCopyLinkDialog(address)
+    }
+
+    private fun showCopyLinkDialog(address: String) {
+        val editor = EditText(this).apply {
+            setText(address)
+            setTextIsSelectable(true)
+            minLines = 3
+            maxLines = 7
+            setPadding(28, 20, 28, 20)
+            setSelection(0)
         }
-
-        status.text = "正在将媒体转换为 MP4。视频较长时需要等待，请保持应用在后台运行…"
-
-        val folder = getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: filesDir
-        if (!folder.exists()) folder.mkdirs()
-        val output = File(folder, "video_${System.currentTimeMillis()}.mp4")
-        val mediaItem = MediaItem.fromUri(Uri.parse(address))
-        val listener = object : Transformer.Listener {
-            override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                converting = false
-                progress.visibility = View.GONE
-                if (!output.exists() || output.length() <= 0L) {
-                    downloadButton.isEnabled = selectedMediaAddress != null
-                    status.text = "转换结束但没有生成有效 MP4 文件，请更换视频源重试。"
-                    return
-                }
-                try {
-                    val browserUrl = downloadServer.register(output)
-                    status.text = "当前所选视频已转换为 MP4（${output.length() / 1024 / 1024} MB），正在交给浏览器下载。下载完成后可返回选择下一个。"
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(browserUrl)).addCategory(Intent.CATEGORY_BROWSABLE)
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    status.text = "MP4 已生成，但无法打开浏览器：${e.message}"
-                    downloadButton.isEnabled = selectedMediaAddress != null
-                }
+        AlertDialog.Builder(this)
+            .setTitle("已提取到媒体链接")
+            .setMessage("这是播放器请求的媒体地址。MP4 通常是单个视频文件；M3U8/MPD 是播放清单，可能需要原网页会话或请求来源才能使用。")
+            .setView(editor)
+            .setPositiveButton("复制链接") { _, _ ->
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("媒体链接", address))
+                status.text = "链接已复制。你可以粘贴到支持该格式的播放器或下载工具中。"
+                Toast.makeText(this, "媒体链接已复制", Toast.LENGTH_SHORT).show()
             }
-
-            override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
-                converting = false
-                progress.visibility = View.GONE
-                downloadButton.isEnabled = selectedMediaAddress != null
-                status.text = "转换失败：${exportException.message ?: "该视频封装或编码不受当前设备支持，或媒体源需要登录/请求头"}"
+            .setNeutralButton("全选") { _, _ ->
+                editor.requestFocus()
+                editor.selectAll()
             }
-        }
-
-        try {
-            transformer = Transformer.Builder(this)
-                .setVideoMimeType(MimeTypes.VIDEO_H264)
-                .setAudioMimeType(MimeTypes.AUDIO_AAC)
-                .addListener(listener)
-                .build()
-            transformer?.start(EditedMediaItem.Builder(mediaItem).build(), output.absolutePath)
-        } catch (e: Exception) {
-            converting = false
-            progress.visibility = View.GONE
-            downloadButton.isEnabled = selectedMediaAddress != null
-            status.text = "无法启动 MP4 转换：${e.message}"
-        }
+            .setNegativeButton("关闭", null)
+            .show()
     }
 
     private fun findMedia(page: String): String? {
