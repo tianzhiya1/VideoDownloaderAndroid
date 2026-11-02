@@ -45,6 +45,8 @@ class MainActivity : Activity() {
     private lateinit var mediaContainer: LinearLayout
     private lateinit var downloadButton: Button
     private var selectedMediaAddress: String? = null
+    private var manuallySelected = false
+    private val candidateViews = LinkedHashMap<String, TextView>()
     private val capturedMedia = ConcurrentHashMap<String, Map<String, String>>()
     private var transformer: Transformer? = null
     private var converting = false
@@ -167,6 +169,8 @@ class MainActivity : Activity() {
     private fun resetCandidates() {
         capturedMedia.clear()
         selectedMediaAddress = null
+        manuallySelected = false
+        candidateViews.clear()
         mediaContainer.removeAllViews()
         downloadButton.isEnabled = false
         downloadButton.text = "转换为 MP4 并用浏览器下载"
@@ -226,20 +230,52 @@ class MainActivity : Activity() {
     private fun addMediaCandidate(address: String) {
         val kind = mediaKind(address)
         if (kind.isEmpty()) return
-        val current = selectedMediaAddress
-        if (current == null || candidatePriority(address) < candidatePriority(current)) {
-            selectedMediaAddress = address
+
+        if (candidateViews.containsKey(address)) return
+
+        // Before the user makes a choice, keep the best default candidate.
+        // Once a row is tapped, never silently switch away from that choice.
+        if (!manuallySelected) {
+            val current = selectedMediaAddress
+            if (current == null || candidatePriority(address) < candidatePriority(current)) {
+                selectedMediaAddress = address
+            }
         }
-        if (mediaContainer.findViewWithTag<View>(address) == null && mediaContainer.childCount < 30) {
-            mediaContainer.addView(TextView(this).apply {
-                text = "检测到 $kind：${address.take(120)}"
+
+        if (mediaContainer.childCount < 30) {
+            val row = TextView(this).apply {
+                text = "○  $kind：${address.take(110)}"
                 textSize = 12f
-                tag = address
-            })
+                setPadding(12, 14, 12, 14)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    if (converting) return@setOnClickListener
+                    manuallySelected = true
+                    selectedMediaAddress = address
+                    refreshCandidateSelection()
+                    status.text = "已选择这个视频。点击下面唯一的按钮，只转换并下载这个视频。"
+                }
+            }
+            candidateViews[address] = row
+            mediaContainer.addView(row)
         }
+        refreshCandidateSelection()
         downloadButton.isEnabled = !converting && selectedMediaAddress != null
-        downloadButton.text = "转换为 MP4 并用浏览器下载（已识别 ${mediaContainer.childCount} 个）"
-        status.text = "已选中优先级最高的视频源。点击唯一的下载按钮即可转换并交给浏览器。"
+        downloadButton.text = "转换所选视频为 MP4 并用浏览器下载（共识别 ${candidateViews.size} 个）"
+        if (!manuallySelected) {
+            status.text = "已自动选中优先级较高的视频。你也可以点选列表中的任意一个，再用同一个按钮单独转换。"
+        }
+    }
+
+    private fun refreshCandidateSelection() {
+        candidateViews.forEach { (address, row) ->
+            val selected = address == selectedMediaAddress
+            val kind = mediaKind(address)
+            row.text = if (selected) "● 已选择  $kind：${address.take(110)}"
+                       else "○ 点此选择  $kind：${address.take(110)}"
+            row.setBackgroundColor(if (selected) 0x223F83F8 else 0x00000000)
+        }
     }
 
     private fun convertThenOpenBrowser() {
@@ -265,7 +301,7 @@ class MainActivity : Activity() {
                 }
                 try {
                     val browserUrl = downloadServer.register(output)
-                    status.text = "MP4 已生成（${output.length() / 1024 / 1024} MB），正在交给浏览器下载…"
+                    status.text = "当前所选视频已转换为 MP4（${output.length() / 1024 / 1024} MB），正在交给浏览器下载。下载完成后可返回选择下一个。"
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(browserUrl)).addCategory(Intent.CATEGORY_BROWSABLE)
                     startActivity(intent)
                 } catch (e: Exception) {
