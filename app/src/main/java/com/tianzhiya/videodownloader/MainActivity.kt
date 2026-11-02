@@ -333,3 +333,140 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 }
+
+
+/**
+ * Serves a tiny local download page to the phone browser. The browser downloads
+ * the media through this loopback endpoint, which adds the captured page headers
+ * and cookies and returns Content-Disposition: attachment.
+ */
+private class BrowserDownloadServer(private val context: Context) {
+    private data class Media(val url: String, val headers: Map<String, String>, val cookie: String?)
+    private val items = ConcurrentHashMap<String, Media>()
+    @Volatile private var running = false
+    private var serverSocket: java.net.ServerSocket? = null
+    private var worker: Thread? = null
+    private var port: Int = 0
+
+    fun start() {
+        if (running) return
+        try {
+            serverSocket = java.net.ServerSocket(0, 10, java.net.InetAddress.getByName("127.0.0.1"))
+            port = serverSocket!!.localPort
+            running = true
+            worker = Thread {
+                while (running) {
+                    try {
+                        val socket = serverSocket?.accept() ?: break
+                        Thread { handle(socket) }.start()
+                    } catch (_: Exception) {
+                        if (running) continue
+                    }
+                }
+            }.apply { name = "browser-download-server"; isDaemon = true; start() }
+        } catch (e: Exception) {
+            running = false
+        }
+    }
+
+    fun createDownloadPage(url: String, headers: Map<String, String>, cookie: String?): String {
+        check(running && port > 0) { "本地下载页面服务未启动" }
+        val token = java.util.UUID.randomUUID().toString().replace("-", "")
+        items[token] = Media(url, headers.toMap(), cookie)
+        return "http://127.0.0.1:$port/page/$token"
+    }
+
+    private fun handle(socket: java.net.Socket) {
+        socket.use { client ->
+            try {
+                client.soTimeout = 30000
+                val input = client.getInputStream().bufferedReader(Charsets.US_ASCII)
+                val first = input.readLine() ?: return
+                while (true) {
+                    val line = input.readLine() ?: break
+                    if (line.isEmpty()) break
+                }
+                val path = first.split(" ").getOrNull(1) ?: return
+                val token = path.substringAfterLast("/")
+                val media = items[token]
+                if (media == null) {
+                    respond(client, "404 Not Found", "text/plain; charset=utf-8", "下载链接已失效，请返回应用重新识别。")
+                    return
+                }
+                if (path.startsWith("/page/")) {
+                    val html = """
+                        <!doctype html><html lang="zh-CN"><meta charset="utf-8">
+                        <meta name="viewport" content="width=device-width,initial-scale=1">
+                        <title>视频下载</title>
+                        <style>
+                        body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:28px 20px;background:#f5f6f8;color:#202124}
+                        main{max-width:520px;margin:8vh auto;background:white;padding:26px;border-radius:18px;box-shadow:0 4px 24px #0001}
+                        h2{margin-top:0}p{color:#555;line-height:1.6}
+                        a{display:block;text-align:center;text-decoration:none;background:#1677ff;color:white;padding:16px;border-radius:12px;font-size:18px;font-weight:600;margin-top:24px}
+                        small{display:block;margin-top:18px;color:#777;line-height:1.5}
+                        </style><main><h2>视频已准备好</h2>
+                        <p>点击下面的按钮，浏览器将下载视频文件并保存到手机的下载目录。</p>
+                        <a href="/download/$token">下载视频</a>
+                        <small>如果浏览器询问保存位置，请选择手机上的保存目录。请仅下载你有权保存的内容。</small>
+                        </main></html>
+                    """.trimIndent()
+                    respond(client, "200 OK", "text/html; charset=utf-8", html)
+                } else if (path.startsWith("/download/")) {
+                    proxyDownload(client, media)
+                } else {
+                    respond(client, "404 Not Found", "text/plain; charset=utf-8", "Not found")
+                }
+            } catch (_: Exception) {
+                // Browser may close the connection after the download has begun.
+            }
+        }
+    }
+
+    private fun proxyDownload(client: java.net.Socket, media: Media) {
+        val connection = (URL(media.url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20000
+            readTimeout = 60000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", media.headers["User-Agent"] ?: "Mozilla/5.0 (Android)")
+            media.headers.forEach { (key, value) -> setRequestProperty(key, value) }
+            if (!media.cookie.isNullOrBlank()) setRequestProperty("Cookie", media.cookie)
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                respond(client, "$code Upstream Error", "text/plain; charset=utf-8", "视频源返回 HTTP $code。可能需要重新打开网页或登录。")
+                return
+            }
+            val pathName = Uri.parse(media.url).lastPathSegment?.substringBefore("?")
+                ?.replace(Regex("[^A-Za-z0-9._-]"), "_")?.take(80)
+            val filename = if (pathName.isNullOrBlank()) "video.mp4" else pathName
+            val output = client.getOutputStream()
+            val header = "HTTP/1.1 200 OK\r\n" +
+                "Content-Type: application/octet-stream\r\n" +
+                "Content-Disposition: attachment; filename=\"$filename\"; filename*=UTF-8''video.mp4\r\n" +
+                "Cache-Control: no-store\r\n" +
+                "Connection: close\r\n\r\n"
+            output.write(header.toByteArray(Charsets.US_ASCII))
+            connection.inputStream.use { source -> source.copyTo(output, 64 * 1024) }
+            output.flush()
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun respond(socket: java.net.Socket, status: String, type: String, body: String) {
+        val bytes = body.toByteArray(Charsets.UTF_8)
+        val header = "HTTP/1.1 $status\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
+        socket.getOutputStream().apply {
+            write(header.toByteArray(Charsets.US_ASCII))
+            write(bytes)
+            flush()
+        }
+    }
+
+    fun stop() {
+        running = false
+        try { serverSocket?.close() } catch (_: Exception) {}
+        items.clear()
+    }
+}
