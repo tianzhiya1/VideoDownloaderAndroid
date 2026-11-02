@@ -35,7 +35,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create v1.1.1 app/build/outputs/apk/debug/app-debug.apk \
+          gh release create v1.1.2 app/build/outputs/apk/debug/app-debug.apk \
             --repo "$GITHUB_REPOSITORY" \
-            --title "VideoDownloader 1.1.1" \
-            --notes "Bilibili MP4 direct-link handling and one-at-a-time video selection."
+            --title "VideoDownloader 1.1.2" \
+            --notes "In-app copyable media links; Bilibili direct MP4 and detected HLS/DASH manifests."
