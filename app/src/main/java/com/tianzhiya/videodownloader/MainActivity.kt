@@ -162,7 +162,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     progress.visibility = android.view.View.GONE
                     if (media == null) {
-                        status.text = "没有找到可直接访问的 MP4 或 M3U8。动态播放器请使用下面的“应用内打开网页并检测视频”。"
+                        status.text = "没有找到公开媒体地址。动态播放器请使用“应用内打开网页并检测视频”；加密或受保护的流可能无法识别。"
                     } else {
                         status.text = "找到媒体直链：$media"
                         addMediaCandidate(media)
@@ -177,40 +177,39 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun isMediaUrl(value: String): Boolean {
-        val clean = value.substringBefore('?').substringBefore('#')
-        return clean.endsWith(".mp4", true) || clean.endsWith(".m3u8", true)
+    private fun mediaKind(value: String): String {
+        val clean = value.substringBefore('?').substringBefore('#').lowercase()
+        return when {
+            clean.endsWith(".m3u8") -> "HLS"
+            clean.endsWith(".mpd") -> "DASH"
+            listOf(".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".flv", ".3gp", ".ts", ".mpeg", ".mpg", ".wmv", ".ogv", ".mts", ".m2ts").any { clean.endsWith(it) } -> "视频文件"
+            else -> ""
+        }
     }
+
+    private fun isMediaUrl(value: String): Boolean = mediaKind(value).isNotEmpty()
 
     private fun addMediaCandidate(address: String) {
         if (mediaContainer.childCount > 30 || mediaContainer.findViewWithTag<android.view.View>(address) != null) return
-        val isHls = address.substringBefore('?').substringBefore('#').endsWith(".m3u8", true)
+        val kind = mediaKind(address)
+        val isHls = kind == "HLS"
+        val isDash = kind == "DASH"
         val item = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 6, 0, 6)
         }
         val label = TextView(this).apply {
-            text = if (isHls) "检测到 HLS 播放列表：${address.take(100)}" else "检测到 MP4 视频：${address.take(100)}"
+            text = "检测到 $kind：${address.take(100)}"
             textSize = 12f
         }
         item.tag = address
         item.addView(label)
         val headers = capturedMedia[address] ?: emptyMap()
-        if (!isHls) {
-            item.addView(Button(this).apply {
-                text = "交给手机浏览器下载 MP4"
-                setOnClickListener { openInBrowserForDownload(address) }
-            })
-        }
-        if (isHls) {
-            item.addView(Button(this).apply {
-                text = "在应用内下载 HLS"
-                setOnClickListener {
-                    status.text = "准备应用内下载 HLS…"
-                    downloadHls(address, headers)
-                }
-            })
-        }
+        item.addView(Button(this).apply {
+            text = if (isHls) "在浏览器下载 HLS 视频（基础 TS 流）" else if (isDash) "DASH 流暂不支持合并下载" else "在手机浏览器下载视频"
+            isEnabled = !isDash
+            setOnClickListener { openInBrowserForDownload(address) }
+        })
         mediaContainer.addView(item)
         status.text = "已检测到 ${mediaContainer.childCount} 个媒体地址，请选择下载方式"
     }
@@ -439,13 +438,19 @@ private class BrowserDownloadServer(private val context: Context) {
                 respond(client, "$code Upstream Error", "text/plain; charset=utf-8", "视频源返回 HTTP $code。可能需要重新打开网页或登录。")
                 return
             }
+            if (media.url.substringBefore("?").substringBefore("#").endsWith(".m3u8", true)) {
+                connection.disconnect()
+                proxyHlsDownload(client, media)
+                return
+            }
             val pathName = Uri.parse(media.url).lastPathSegment?.substringBefore("?")
                 ?.replace(Regex("[^A-Za-z0-9._-]"), "_")?.take(80)
-            val filename = if (pathName.isNullOrBlank()) "video.mp4" else pathName
+            val filename = if (pathName.isNullOrBlank()) "video.bin" else pathName
             val output = client.getOutputStream()
+            val safeName = filename.replace("\"", "")
             val header = "HTTP/1.1 200 OK\r\n" +
                 "Content-Type: application/octet-stream\r\n" +
-                "Content-Disposition: attachment; filename=\"$filename\"; filename*=UTF-8''video.mp4\r\n" +
+                "Content-Disposition: attachment; filename=\"$safeName\"\r\n" +
                 "Cache-Control: no-store\r\n" +
                 "Connection: close\r\n\r\n"
             output.write(header.toByteArray(Charsets.US_ASCII))
@@ -453,6 +458,66 @@ private class BrowserDownloadServer(private val context: Context) {
             output.flush()
         } finally {
             connection.disconnect()
+        }
+    }
+
+    private fun proxyHlsDownload(client: java.net.Socket, media: Media) {
+        fun open(url: URL): HttpURLConnection = (url.openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20000
+            readTimeout = 60000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", media.headers["User-Agent"] ?: "Mozilla/5.0 (Android)")
+            media.headers.forEach { (key, value) -> setRequestProperty(key, value) }
+            if (!media.cookie.isNullOrBlank()) setRequestProperty("Cookie", media.cookie)
+        }
+        var playlistUrl = URL(media.url)
+        var connection = open(playlistUrl)
+        try {
+            var playlist = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            connection.disconnect()
+            if (playlist.contains("#EXT-X-STREAM-INF")) {
+                val lines = playlist.lines()
+                var bestBandwidth = -1L
+                var selected: String? = null
+                var pending = 0L
+                for (line in lines) {
+                    val t = line.trim()
+                    if (t.startsWith("#EXT-X-STREAM-INF")) {
+                        pending = Regex("""BANDWIDTH=(\\d+)""").find(t)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                    } else if (t.isNotEmpty() && !t.startsWith("#")) {
+                        if (pending > bestBandwidth) { bestBandwidth = pending; selected = t }
+                    }
+                }
+                playlistUrl = URL(playlistUrl, selected ?: error("HLS 主播放列表没有可用画质"))
+                connection = open(playlistUrl)
+                playlist = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                connection.disconnect()
+            }
+            if (playlist.contains("#EXT-X-KEY") && !playlist.contains("#EXT-X-KEY:METHOD=NONE")) {
+                respond(client, "415 Unsupported Media Type", "text/plain; charset=utf-8", "该 HLS 流使用加密密钥，本版本不处理加密流。")
+                return
+            }
+            val lines = playlist.lines().map { it.trim() }
+            val initLine = lines.firstOrNull { it.startsWith("#EXT-X-MAP:") }
+            val initUrl = initLine?.let { Regex("""URI="([^"]+)"""").find(it)?.groupValues?.get(1) }
+                ?.let { URL(playlistUrl, it) }
+            val segments = lines.filter { it.isNotEmpty() && !it.startsWith("#") }.map { URL(playlistUrl, it) }
+            if (segments.isEmpty()) {
+                respond(client, "422 Unprocessable Content", "text/plain; charset=utf-8", "HLS 播放列表中没有可下载的视频分片。")
+                return
+            }
+            val output = client.getOutputStream()
+            val header = "HTTP/1.1 200 OK\\r\\nContent-Type: video/mp2t\\r\\nContent-Disposition: attachment; filename=video.ts\\r\\nCache-Control: no-store\\r\\nConnection: close\\r\\n\\r\\n"
+            output.write(header.toByteArray(Charsets.US_ASCII))
+            if (initUrl != null) open(initUrl).let { c -> c.inputStream.use { it.copyTo(output, 64 * 1024) }; c.disconnect() }
+            segments.forEach { segment ->
+                val c = open(segment)
+                c.inputStream.use { it.copyTo(output, 64 * 1024) }
+                c.disconnect()
+            }
+            output.flush()
+        } catch (e: Exception) {
+            try { respond(client, "502 Bad Gateway", "text/plain; charset=utf-8", "HLS 下载失败：${e.message ?: "媒体源错误"}") } catch (_: Exception) {}
         }
     }
 
