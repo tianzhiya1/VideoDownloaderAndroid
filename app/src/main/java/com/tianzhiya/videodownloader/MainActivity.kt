@@ -202,13 +202,15 @@ class MainActivity : Activity() {
                 setOnClickListener { openInBrowserForDownload(address) }
             })
         }
-        item.addView(Button(this).apply {
-            text = if (isHls) "在应用内下载 HLS" else "使用应用内下载 MP4"
-            setOnClickListener {
-                status.text = "准备应用内下载…"
-                if (isHls) downloadHls(address, headers) else downloadMp4(address, headers)
-            }
-        })
+        if (isHls) {
+            item.addView(Button(this).apply {
+                text = "在应用内下载 HLS"
+                setOnClickListener {
+                    status.text = "准备应用内下载 HLS…"
+                    downloadHls(address, headers)
+                }
+            })
+        }
         mediaContainer.addView(item)
         status.text = "已检测到 ${mediaContainer.childCount} 个媒体地址，请选择下载方式"
     }
