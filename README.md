@@ -32,3 +32,8 @@ Kotlin、Android SDK、Media3、yt-dlp-android 2.0.2（内嵌 Python 3.13）。
 yt-dlp 引擎及其 Android 封装按其上游许可和第三方声明分发。YouTube 会持续调整播放器和访问机制，部分视频可能因地区、网络、账号权限或播放器挑战而失败。此版本不包含付费 TLS 指纹模拟组件，也不绕过 DRM、付费墙、私密视频或其他访问控制。请只下载你有权保存的内容。
 
 由于内嵌 Python 运行环境，APK 会比旧版明显增大；当前依赖仅支持 arm64-v8a 和 x86_64。
+
+
+## YouTube 登录验证（Android）
+
+如果 YouTube 提示“Sign in to confirm you’re not a bot”，请先从你自己的浏览器登录 YouTube，并使用可信的 Cookie 导出工具导出 Netscape 格式的 `cookies.txt`。在本应用点击“导入 YouTube Cookie 文件”，选择该文件，再重新下载。Cookie 文件只复制到本机应用私有目录，不会上传；不要把 Cookie 文件发给任何人。Cookie 过期后需要重新导入。Android 浏览器通常不能直接被应用读取 Cookie，因此需要手动导入文件。此功能不绕过 DRM、付费墙、私密视频或其他访问控制。
