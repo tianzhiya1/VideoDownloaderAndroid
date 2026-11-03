@@ -21,7 +21,7 @@ MEDIA_EXTENSIONS = (
     ".m2ts", ".m3u8", ".mpd"
 )
 MEDIA_RE = re.compile(
-    r"""https?://[^"'\\s<>]+?\.(?:mp4|m4v|mov|webm|mkv|avi|flv|3gp|ts|mpeg|mpg|wmv|ogv|mts|m2ts|m3u8|mpd)(?:\\?[^"'\\s<>]*)?""",
+    r"""https?://[^"'\s<>]+?\.(?:mp4|m4v|mov|webm|mkv|avi|flv|3gp|ts|mpeg|mpg|wmv|ogv|mts|m2ts|m3u8|mpd)(?:\?[^"'\s<>]*)?""",
     re.IGNORECASE
 )
 
