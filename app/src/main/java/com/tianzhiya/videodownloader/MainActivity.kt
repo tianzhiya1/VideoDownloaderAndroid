@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ContentValues
 import android.content.ClipboardManager
 import android.content.Intent
+import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
@@ -56,6 +57,9 @@ class MainActivity : Activity() {
     private lateinit var mediaContainer: LinearLayout
     private lateinit var downloadButton: Button
     private lateinit var ytDlpButton: Button
+    private lateinit var cookieButton: Button
+    private val cookiePickerRequest = 7412
+    private val cookieFile: File by lazy { File(filesDir, "yt-dlp-cookies.txt") }
     private var ytDlpInitialized = false
     private var youtubeCookiesFile: File? = null
     private val requestImportCookies = 4102
@@ -111,6 +115,17 @@ class MainActivity : Activity() {
             setOnClickListener { startYtDlpDownload(urlInput.text.toString().trim()) }
         }
         root.addView(ytDlpButton)
+        cookieButton = Button(this).apply {
+            text = if (cookieFile.exists()) "YouTube Cookie 已导入（点击更换）" else "导入 YouTube Cookie 文件"
+            setOnClickListener {
+                val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "text/*"
+                }
+                startActivityForResult(picker, cookiePickerRequest)
+            }
+        }
+        root.addView(cookieButton)
         root.addView(Button(this).apply {
             text = "导入 YouTube Cookie（cookies.txt）"
             setOnClickListener {
@@ -196,6 +211,38 @@ class MainActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(root) })
     }
 
+    @Deprecated("Use Activity Result APIs when modernizing this legacy Activity")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != cookiePickerRequest || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        executor.execute {
+            try {
+                contentResolver.openInputStream(uri)?.use { input ->
+                    cookieFile.outputStream().use { output -> input.copyTo(output) }
+                } ?: throw IllegalStateException("无法读取所选文件")
+                val valid = cookieFile.readLines().any {
+                    it.startsWith("# Netscape HTTP Cookie File") ||
+                    it.startsWith("# HTTP Cookie File") ||
+                    (it.isNotBlank() && !it.startsWith("#") && it.split("\\t").size >= 7)
+                }
+                if (!valid) {
+                    cookieFile.delete()
+                    throw IllegalArgumentException("文件格式不正确。请选择 Netscape 格式的 cookies.txt")
+                }
+                runOnUiThread {
+                    cookieButton.text = "YouTube Cookie 已导入（点击更换）"
+                    status.text = "Cookie 已安全保存在本机应用私有目录。再次下载时会由 yt-dlp 本地读取。"
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    cookieFile.delete()
+                    status.text = "导入 Cookie 失败：${e.message ?: "无法读取文件"}"
+                }
+            }
+        }
+    }
+
     private fun initYtDlp() {
         try {
             YtDlp.init(applicationContext)
@@ -227,6 +274,9 @@ class MainActivity : Activity() {
             .addOption("--no-playlist")
             .addOption("-f", "best[height<=1080]/best")
             .addOption("--no-mtime")
+        if (cookieFile.exists() && cookieFile.length() > 0L) {
+            request.addOption("--cookies", cookieFile.absolutePath)
+        }
         youtubeCookiesFile?.takeIf { it.isFile && it.length() > 0L }?.let {
             request.addOption("--cookies", it.absolutePath)
         }
