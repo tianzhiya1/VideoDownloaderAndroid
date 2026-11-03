@@ -24,18 +24,19 @@ jobs:
         with:
           gradle-version: "8.9"
       - name: Build debug APK
-        run: gradle assembleDebug
+        run: gradle --no-daemon assembleDebug
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk VideoDownloader-Android.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloader-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: VideoDownloader-Android
+          path: VideoDownloader-Android.apk
           if-no-files-found: error
       - name: Publish APK to GitHub Releases
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.1.2 app/build/outputs/apk/debug/app-debug.apk \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "VideoDownloader 1.1.2" \
-            --notes "In-app copyable media links; Bilibili direct MP4 and detected HLS/DASH manifests."
+          VERSION="v1.2.0"
+          gh release view "$VERSION" >/dev/null 2>&1 || gh release create "$VERSION" --title "VideoDownloader Android $VERSION" --notes "Adds yt-dlp powered YouTube and supported-site downloads. Android 7.0+; ARM64 and x86_64. No DRM or paywall bypass."
+          gh release upload "$VERSION" VideoDownloader-Android.apk --clobber
