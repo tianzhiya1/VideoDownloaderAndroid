@@ -3,11 +3,14 @@ package com.tianzhiya.videodownloader
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipData
+import android.content.ContentValues
 import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -22,6 +25,10 @@ import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import dev.ffmpegkit_maintained.ytdlp.DownloadProgressCallback
+import dev.ffmpegkit_maintained.ytdlp.YtDlp
+import dev.ffmpegkit_maintained.ytdlp.YtDlpException
+import dev.ffmpegkit_maintained.ytdlp.YtDlpRequest
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.transformer.Composition
@@ -48,6 +55,8 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var mediaContainer: LinearLayout
     private lateinit var downloadButton: Button
+    private lateinit var ytDlpButton: Button
+    private var ytDlpInitialized = false
     private var selectedMediaAddress: String? = null
     private var manuallySelected = false
     private val candidateViews = LinkedHashMap<String, TextView>()
@@ -60,6 +69,7 @@ class MainActivity : Activity() {
         downloadServer = Mp4BrowserServer()
         downloadServer.start()
         buildUi()
+        initYtDlp()
         handleIntent(intent)
     }
 
@@ -94,6 +104,11 @@ class MainActivity : Activity() {
             text = "识别网页中的视频"
             setOnClickListener { startDetection(urlInput.text.toString().trim()) }
         })
+        ytDlpButton = Button(this).apply {
+            text = "YouTube / yt-dlp 下载视频"
+            setOnClickListener { startYtDlpDownload(urlInput.text.toString().trim()) }
+        }
+        root.addView(ytDlpButton)
         root.addView(Button(this).apply {
             text = "应用内打开网页并检测"
             setOnClickListener {
@@ -167,6 +182,114 @@ class MainActivity : Activity() {
         }
         root.addView(status)
         setContentView(ScrollView(this).apply { addView(root) })
+    }
+
+    private fun initYtDlp() {
+        try {
+            YtDlp.init(applicationContext)
+            ytDlpInitialized = true
+            status.text = "yt-dlp 已就绪，可解析 YouTube 和其他支持的网站。"
+        } catch (e: YtDlpException) {
+            ytDlpInitialized = false
+            status.text = "yt-dlp 初始化失败：${e.message ?: "运行环境不可用"}"
+            ytDlpButton.isEnabled = false
+        }
+    }
+
+    private fun startYtDlpDownload(page: String) {
+        if (!isHttpUrl(page)) {
+            status.text = "请先输入有效的 YouTube 或其他视频网页链接。"
+            return
+        }
+        if (!ytDlpInitialized) {
+            status.text = "yt-dlp 尚未初始化成功，无法开始下载。"
+            return
+        }
+        val outputDir = getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+            ?: File(cacheDir, "yt-dlp-movies")
+        if (!outputDir.exists()) outputDir.mkdirs()
+        val before = outputDir.listFiles()?.map { it.name }?.toSet() ?: emptySet()
+        val outputTemplate = File(outputDir, "%(title)s-%(id)s.%(ext)s").absolutePath
+        val request = YtDlpRequest(page)
+            .setOutputTemplate(outputTemplate)
+            .addOption("--no-playlist")
+            .addOption("-f", "best[height<=1080]/best")
+            .addOption("--no-mtime")
+        ytDlpButton.isEnabled = false
+        progress.visibility = View.VISIBLE
+        progress.isIndeterminate = false
+        progress.progress = 0
+        status.text = "正在解析并下载视频……"
+        executor.execute {
+            try {
+                val task = YtDlp.executeAsync(request, object : DownloadProgressCallback {
+                    override fun onProgressUpdate(progressValue: Float, etaInSeconds: Long, line: String) {
+                        runOnUiThread {
+                            if (progressValue >= 0f) {
+                                progress.progress = progressValue.toInt().coerceIn(0, 100)
+                                status.text = "下载中：${progressValue.toInt()}%  剩余约 ${etaInSeconds}s\n${line.take(180)}"
+                            } else if (line.isNotBlank()) {
+                                status.text = "正在处理视频：${line.take(180)}"
+                            }
+                        }
+                    }
+                })
+                val response = task.get()
+                val downloaded = outputDir.listFiles()
+                    ?.filter { it.isFile && it.name !in before }
+                    ?.maxByOrNull { it.lastModified() }
+                runOnUiThread {
+                    progress.visibility = View.GONE
+                    ytDlpButton.isEnabled = true
+                    if (response.isSuccess && downloaded != null) {
+                        val saved = publishDownloadedVideo(downloaded)
+                        status.text = if (saved != null) {
+                            "下载完成，已保存到：Movies/VideoDownloader/${downloaded.name}"
+                        } else {
+                            "下载完成，文件保存在应用视频目录：${downloaded.absolutePath}"
+                        }
+                        Toast.makeText(this, "视频下载完成", Toast.LENGTH_LONG).show()
+                    } else {
+                        status.text = "下载未完成（退出码：${response.exitCode}）。${response.errorOutput.ifBlank { "请检查视频是否可公开访问，或稍后重试。" }}"
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    progress.visibility = View.GONE
+                    ytDlpButton.isEnabled = true
+                    status.text = "yt-dlp 下载失败：${e.cause?.message ?: e.message ?: "未知错误"}"
+                }
+            }
+        }
+    }
+
+    private fun publishDownloadedVideo(file: File): Uri? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val extension = file.extension.lowercase()
+        val mime = when (extension) {
+            "mp4", "m4v" -> "video/mp4"
+            "webm" -> "video/webm"
+            "mkv" -> "video/x-matroska"
+            else -> "video/*"
+        }
+        val values = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
+            put(MediaStore.Video.Media.MIME_TYPE, mime)
+            put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/VideoDownloader")
+            put(MediaStore.Video.Media.IS_PENDING, 1)
+        }
+        val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        return try {
+            contentResolver.openOutputStream(uri)?.use { output ->
+                file.inputStream().use { input -> input.copyTo(output) }
+            } ?: throw IllegalStateException("无法写入系统媒体库")
+            val done = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
+            contentResolver.update(uri, done, null, null)
+            uri
+        } catch (e: Exception) {
+            contentResolver.delete(uri, null, null)
+            null
+        }
     }
 
     private fun handleIntent(intent: Intent?) {
