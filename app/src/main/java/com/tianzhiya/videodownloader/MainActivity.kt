@@ -57,15 +57,10 @@ class MainActivity : Activity() {
     private lateinit var mediaContainer: LinearLayout
     private lateinit var downloadButton: Button
     private lateinit var ytDlpButton: Button
-    private lateinit var cookieImportButton: Button
-    private var youtubeCookiesFile: File? = null
-    private val cookiePickerRequest = 8021
     private lateinit var cookieButton: Button
     private val cookiePickerRequest = 7412
     private val cookieFile: File by lazy { File(filesDir, "yt-dlp-cookies.txt") }
     private var ytDlpInitialized = false
-    private var youtubeCookiesFile: File? = null
-    private val requestImportCookies = 4102
     private var selectedMediaAddress: String? = null
     private var manuallySelected = false
     private val candidateViews = LinkedHashMap<String, TextView>()
@@ -78,8 +73,6 @@ class MainActivity : Activity() {
         downloadServer = Mp4BrowserServer()
         downloadServer.start()
         buildUi()
-        youtubeCookiesFile = File(filesDir, "youtube-cookies.txt").takeIf { it.exists() && it.length() > 0 }
-        if (youtubeCookiesFile != null) cookieImportButton.text = "YouTube Cookie 已导入（点击可更换）"
         initYtDlp()
         handleIntent(intent)
     }
@@ -131,16 +124,6 @@ class MainActivity : Activity() {
             }
         }
         root.addView(cookieButton)
-        root.addView(Button(this).apply {
-            text = "导入 YouTube Cookie（cookies.txt）"
-            setOnClickListener {
-                val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "text/*"
-                }
-                startActivityForResult(picker, requestImportCookies)
-            }
-        })
         root.addView(Button(this).apply {
             text = "应用内打开网页并检测"
             setOnClickListener {
@@ -226,11 +209,14 @@ class MainActivity : Activity() {
                 contentResolver.openInputStream(uri)?.use { input ->
                     cookieFile.outputStream().use { output -> input.copyTo(output) }
                 } ?: throw IllegalStateException("无法读取所选文件")
-                val valid = cookieFile.readLines().any {
-                    it.startsWith("# Netscape HTTP Cookie File") ||
-                    it.startsWith("# HTTP Cookie File") ||
-                    (it.isNotBlank() && !it.startsWith("#") && it.split("\t").size >= 7)
+                val rows = cookieFile.readLines()
+                val hasHeader = rows.firstOrNull()?.trim() in setOf(
+                    "# Netscape HTTP Cookie File", "# HTTP Cookie File"
+                )
+                val hasCookieRows = rows.any {
+                    it.isNotBlank() && !it.startsWith("#") && it.split("\t").size >= 7
                 }
+                val valid = hasHeader && hasCookieRows
                 if (!valid) {
                     cookieFile.delete()
                     throw IllegalArgumentException("文件格式不正确。请选择 Netscape 格式的 cookies.txt")
@@ -249,12 +235,11 @@ class MainActivity : Activity() {
     }
 
     private fun initYtDlp() {
-        youtubeCookiesFile = File(filesDir, "youtube-cookies.txt")
-            .takeIf { it.isFile && it.length() > 0L }
+        val hasCookies = cookieFile.isFile && cookieFile.length() > 0L
         try {
             YtDlp.init(applicationContext)
             ytDlpInitialized = true
-            status.text = if (youtubeCookiesFile != null) {
+            status.text = if (hasCookies) {
                 "yt-dlp 已就绪，已载入本机 YouTube Cookie。"
             } else {
                 "yt-dlp 已就绪，可解析 YouTube 和其他支持的网站。"
@@ -287,9 +272,6 @@ class MainActivity : Activity() {
             .addOption("--no-mtime")
         if (cookieFile.exists() && cookieFile.length() > 0L) {
             request.addOption("--cookies", cookieFile.absolutePath)
-        }
-        youtubeCookiesFile?.takeIf { it.isFile && it.length() > 0L }?.let {
-            request.addOption("--cookies", it.absolutePath)
         }
         ytDlpButton.isEnabled = false
         progress.visibility = View.VISIBLE
@@ -336,76 +318,6 @@ class MainActivity : Activity() {
                     progress.visibility = View.GONE
                     ytDlpButton.isEnabled = true
                     status.text = "yt-dlp 下载失败：${e.cause?.message ?: e.message ?: "未知错误"}"
-                }
-            }
-        }
-    }
-
-    @Deprecated("Use Activity Result APIs when modernizing this screen")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != requestImportCookies || resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
-        executor.execute {
-            try {
-                val destination = File(filesDir, "youtube-cookies.txt")
-                contentResolver.openInputStream(uri)?.use { input ->
-                    destination.outputStream().use { output -> input.copyTo(output) }
-                } ?: throw IllegalStateException("无法读取所选文件")
-                val firstLine = destination.useLines { it.firstOrNull().orEmpty().trim() }
-                if (firstLine != "# Netscape HTTP Cookie File" &&
-                    firstLine != "# HTTP Cookie File") {
-                    destination.delete()
-                    throw IllegalArgumentException("文件格式不正确。请选择 Netscape 格式的 cookies.txt。")
-                }
-                youtubeCookiesFile = destination
-                runOnUiThread {
-                    status.text = "YouTube Cookie 已导入并保存在本机应用私有目录。下次下载会自动使用。请勿分享此文件。"
-                    Toast.makeText(this, "Cookie 导入成功", Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    status.text = "Cookie 导入失败：${e.message ?: "文件读取失败"}"
-                }
-            }
-        }
-    }
-
-    private fun chooseYoutubeCookies() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivityForResult(intent, cookiePickerRequest)
-    }
-
-    @Deprecated("Deprecated in Android API; retained for broad device compatibility")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != cookiePickerRequest || resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
-        executor.execute {
-            try {
-                val content = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                    ?: throw IllegalArgumentException("无法读取所选文件")
-                if (content.length > 5_000_000) throw IllegalArgumentException("Cookie 文件过大")
-                val validCookieRows = content.lineSequence().count { line ->
-                    val row = line.trim()
-                    row.isNotEmpty() && (row.startsWith("#HttpOnly_") || (!row.startsWith("#") && row.count { it == '\t' } >= 6))
-                }
-                if (validCookieRows == 0) throw IllegalArgumentException("文件格式不正确。请导入 Netscape 格式的 cookies.txt")
-                val target = File(filesDir, "youtube-cookies.txt")
-                target.writeText(content, Charsets.UTF_8)
-                youtubeCookiesFile = target
-                runOnUiThread {
-                    cookieImportButton.text = "YouTube Cookie 已导入（点击可更换）"
-                    status.text = "Cookie 已保存在本机应用私有目录。下载时将尝试使用该登录状态。"
-                    Toast.makeText(this, "Cookie 导入成功", Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    status.text = "Cookie 导入失败：${e.message ?: "文件无法读取"}"
                 }
             }
         }
