@@ -78,6 +78,8 @@ class MainActivity : Activity() {
         downloadServer = Mp4BrowserServer()
         downloadServer.start()
         buildUi()
+        youtubeCookiesFile = File(filesDir, "youtube-cookies.txt").takeIf { it.exists() && it.length() > 0 }
+        if (youtubeCookiesFile != null) cookieImportButton.text = "YouTube Cookie 已导入（点击可更换）"
         initYtDlp()
         handleIntent(intent)
     }
