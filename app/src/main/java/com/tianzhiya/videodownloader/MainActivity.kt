@@ -94,7 +94,7 @@ class MainActivity : Activity() {
             textSize = 26f
         })
         root.addView(TextView(this).apply {
-            text = "粘贴网页链接并在应用内打开。识别到真实视频地址后，可在应用内查看并复制链接，不会自动跳转浏览器。"
+            text = "粘贴视频网页链接，解析出视频直链后复制到浏览器下载；本应用不负责下载视频文件。"
             textSize = 14f
             setPadding(0, 12, 0, 20)
         })
@@ -109,7 +109,7 @@ class MainActivity : Activity() {
             setOnClickListener { startDetection(urlInput.text.toString().trim()) }
         })
         ytDlpButton = Button(this).apply {
-            text = "YouTube / yt-dlp 下载视频"
+            text = "解析视频并获取下载链接"
             setOnClickListener { startYtDlpDownload(urlInput.text.toString().trim()) }
         }
         root.addView(ytDlpButton)
@@ -257,67 +257,48 @@ class MainActivity : Activity() {
             return
         }
         if (!ytDlpInitialized) {
-            status.text = "yt-dlp 尚未初始化成功，无法开始下载。"
+            status.text = "yt-dlp 尚未初始化成功，无法解析视频。"
             return
         }
-        val outputDir = getExternalFilesDir(Environment.DIRECTORY_MOVIES)
-            ?: File(cacheDir, "yt-dlp-movies")
-        if (!outputDir.exists()) outputDir.mkdirs()
-        val before = outputDir.listFiles()?.map { it.name }?.toSet() ?: emptySet()
-        val outputTemplate = File(outputDir, "%(title)s-%(id)s.%(ext)s").absolutePath
         val request = YtDlpRequest(page)
-            .setOutputTemplate(outputTemplate)
             .addOption("--no-playlist")
             .addOption("-f", "best[height<=1080]/best")
-            .addOption("--no-mtime")
+            .addOption("--get-url")
         if (cookieFile.exists() && cookieFile.length() > 0L) {
             request.addOption("--cookies", cookieFile.absolutePath)
         }
         ytDlpButton.isEnabled = false
         progress.visibility = View.VISIBLE
-        progress.isIndeterminate = false
-        progress.progress = 0
-        status.text = "正在解析并下载视频……"
+        progress.isIndeterminate = true
+        status.text = "正在解析视频并提取下载链接……"
         executor.execute {
             try {
-                val task = YtDlp.executeAsync(request, object : DownloadProgressCallback {
+                val response = YtDlp.executeAsync(request, object : DownloadProgressCallback {
                     override fun onProgressUpdate(progressValue: Float, etaInSeconds: Long, line: String) {
-                        runOnUiThread {
-                            if (progressValue >= 0f) {
-                                progress.progress = progressValue.toInt().coerceIn(0, 100)
-                                status.text = "下载中：${progressValue.toInt()}%  剩余约 ${etaInSeconds}s\n${line.take(180)}"
-                            } else if (line.isNotBlank()) {
-                                status.text = "正在处理视频：${line.take(180)}"
-                            }
+                        if (line.isNotBlank()) {
+                            runOnUiThread { status.text = "正在解析：${line.take(180)}" }
                         }
                     }
-                })
-                val response = task.get()
-                val downloaded = outputDir.listFiles()
-                    ?.filter { it.isFile && it.name !in before }
-                    ?.maxByOrNull { it.lastModified() }
-                val saved = if (response.isSuccess && downloaded != null) {
-                    publishDownloadedVideo(downloaded)
-                } else null
+                }).get()
+                val directUrl = response.output.lineSequence()
+                    .map { it.trim() }
+                    .firstOrNull { it.startsWith("https://") || it.startsWith("http://") }
                 runOnUiThread {
                     progress.visibility = View.GONE
                     ytDlpButton.isEnabled = true
-                    if (response.isSuccess && downloaded != null) {
-                        status.text = if (saved != null) {
-                            "下载完成，已保存到：Movies/VideoDownloader/${downloaded.name}"
-                        } else {
-                            "下载完成，文件保存在应用视频目录：${downloaded.absolutePath}"
-                        }
-                        Toast.makeText(this, "视频下载完成", Toast.LENGTH_LONG).show()
+                    if (response.isSuccess && !directUrl.isNullOrBlank()) {
+                        status.text = "解析成功，已取得视频直链。点击下方按钮复制，再用浏览器打开下载。"
+                        showCopyLinkDialog(directUrl)
                     } else {
-                        status.text = "下载未完成（退出码：${response.exitCode}）。${response.errorOutput.ifBlank { "请检查视频是否可公开访问，或稍后重试。" }}"
+                        val detail = response.errorOutput.ifBlank { response.output }
+                        status.text = "没有取得可直接使用的下载链接。可能是网站提供分离音视频流，或需要额外验证。\n${detail.take(700)}"
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     progress.visibility = View.GONE
                     ytDlpButton.isEnabled = true
-                    status.text = "yt-dlp 下载失败：${e.cause?.message ?: e.message ?: "未知错误"}"
+                    status.text = "视频解析失败：${e.cause?.message ?: e.message ?: "未知错误"}"
                 }
             }
         }
