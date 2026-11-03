@@ -1,18 +1,24 @@
 # VideoDownloaderAndroid
 
-An Android video downloader for media you are authorized to download.
+Android 视频下载器，现加入 yt-dlp 引擎，用于处理 YouTube 和 yt-dlp 支持的公开视频页面。
 
-## Planned capabilities
-- Accept shared webpage links from Android browsers and pasted URLs.
-- Detect directly exposed MP4 and supported HLS (M3U8) media.
-- Prefer the highest available HLS variant when the playlist exposes bandwidth metadata.
-- Show download status and save supported downloads locally.
+## 功能
+- 粘贴视频网址，或从浏览器/其他应用分享链接。
+- 新增 yt-dlp 下载入口：支持 YouTube 及 yt-dlp 支持的其他网站。
+- 选择 yt-dlp 可用的最佳单文件视频格式（最高尝试 1080p），显示下载进度。
+- Android 10 及以上系统下载完成后保存到系统“Movies/VideoDownloader”目录。
+- 保留原有网页媒体请求监听、MP4/HLS/DASH 链接识别及 Bilibili 解析。
+- 最低 Android 7.0（API 24）；支持 arm64-v8a 和 x86_64。
 
-## Limitations
-This app does not bypass DRM, paywalls, login requirements, or other access controls. Media discovery depends on what the page exposes; dynamic players and protected streams may not be supported.
+## 使用
+1. 粘贴 YouTube 视频网址。
+2. 点击“**YouTube / yt-dlp 下载视频**”。
+3. 等待下载完成，视频会保存到手机 Movies/VideoDownloader 文件夹。
 
-## Windows desktop app
+## 技术
+Kotlin、Android SDK、Media3、yt-dlp-android 2.0.2（内嵌 Python 3.13）。
 
-A Windows 10/11 x64 desktop version is available in the [desktop](desktop/README.md) folder. It uses an embedded browser to detect media URLs and provides a single copy-link action. The Windows build is published separately from the Android APK.
+## 注意
+yt-dlp 引擎及其 Android 封装按其上游许可和第三方声明分发。YouTube 会持续调整播放器和访问机制，部分视频可能因地区、网络、账号权限或播放器挑战而失败。此版本不包含付费 TLS 指纹模拟组件，也不绕过 DRM、付费墙、私密视频或其他访问控制。请只下载你有权保存的内容。
 
-The Android APK will be built with the repository's GitHub Actions workflow once the Gradle project is in place.
+由于内嵌 Python 运行环境，APK 会比旧版明显增大；当前依赖仅支持 arm64-v8a 和 x86_64。
