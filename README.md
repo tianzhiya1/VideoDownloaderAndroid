@@ -1,6 +1,6 @@
 # VideoDownloaderAndroid
 
-Android 视频下载器，现加入 yt-dlp 引擎，用于处理 YouTube 和 yt-dlp 支持的公开视频页面。
+Android 视频链接提取工具。输入视频网页后，由 yt-dlp 解析媒体直链，复制后交给手机浏览器下载；应用本身不下载视频文件。
 
 ## 功能
 - 粘贴视频网址，或从浏览器/其他应用分享链接。
