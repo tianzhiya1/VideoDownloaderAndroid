@@ -238,11 +238,13 @@ class MainActivity : Activity() {
                 val downloaded = outputDir.listFiles()
                     ?.filter { it.isFile && it.name !in before }
                     ?.maxByOrNull { it.lastModified() }
+                val saved = if (response.isSuccess && downloaded != null) {
+                    publishDownloadedVideo(downloaded)
+                } else null
                 runOnUiThread {
                     progress.visibility = View.GONE
                     ytDlpButton.isEnabled = true
                     if (response.isSuccess && downloaded != null) {
-                        val saved = publishDownloadedVideo(downloaded)
                         status.text = if (saved != null) {
                             "下载完成，已保存到：Movies/VideoDownloader/${downloaded.name}"
                         } else {
