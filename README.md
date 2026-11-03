@@ -20,6 +20,10 @@ Android 视频下载器，现加入 yt-dlp 引擎，用于处理 YouTube 和 yt-
 
 Cookie 等同于登录凭证，请勿发给他人或上传到聊天、网盘、GitHub。Cookie 可能过期；YouTube 仍可能因 IP、风控或 PO Token 要求拒绝请求，导入 Cookie 不保证所有视频都可下载。若仍失败，请在浏览器确认可播放并稍后重试。请只下载你有权保存的内容。
 
+## YouTube 登录验证提示
+
+如果 YouTube 提示“Sign in to confirm you’re not a bot”，请先在可信设备的浏览器登录 YouTube，并导出 Netscape 格式的 `cookies.txt`。在应用内点击“导入 YouTube Cookie 文件”并选择该文件，再重新下载。Cookie 会保存在应用私有目录，只在本机交给 yt-dlp 读取。不要把 Cookie 文件发给别人或上传到网盘/GitHub。Cookie 过期后需要重新导出。
+
 ## 使用
 1. 粘贴 YouTube 视频网址。
 2. 点击“**YouTube / yt-dlp 下载视频**”。
