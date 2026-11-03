@@ -9,10 +9,10 @@ android {
 
     defaultConfig {
         applicationId = "com.tianzhiya.videodownloader"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
 
     compileOptions {
@@ -32,4 +32,5 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
     implementation("androidx.media3:media3-exoplayer-dash:$media3Version")
+    implementation("dev.ffmpegkit-maintained:yt-dlp-android:2.0.2")
 }
