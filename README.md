@@ -10,6 +10,16 @@ Android 视频下载器，现加入 yt-dlp 引擎，用于处理 YouTube 和 yt-
 - 保留原有网页媒体请求监听、MP4/HLS/DASH 链接识别及 Bilibili 解析。
 - 最低 Android 7.0（API 24）；支持 arm64-v8a 和 x86_64。
 
+## YouTube 登录验证
+
+如果出现“Sign in to confirm you’re not a bot”：
+1. 在浏览器中正常登录 YouTube，并确认该视频能在浏览器播放。
+2. 从浏览器导出 YouTube 的 Netscape 格式 `cookies.txt` 文件（文件首行应为 `# Netscape HTTP Cookie File` 或 `# HTTP Cookie File`）。
+3. 在应用中点击“导入 YouTube Cookie（cookies.txt）”，选择该文件。
+4. 再次下载。Cookie 仅复制到应用私有目录并在本机使用，不会上传到本项目。
+
+Cookie 等同于登录凭证，请勿发给他人或上传到聊天、网盘、GitHub。Cookie 可能过期；YouTube 仍可能因 IP、风控或 PO Token 要求拒绝请求，导入 Cookie 不保证所有视频都可下载。若仍失败，请在浏览器确认可播放并稍后重试。请只下载你有权保存的内容。
+
 ## 使用
 1. 粘贴 YouTube 视频网址。
 2. 点击“**YouTube / yt-dlp 下载视频**”。
