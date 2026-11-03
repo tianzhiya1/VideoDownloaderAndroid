@@ -249,10 +249,16 @@ class MainActivity : Activity() {
     }
 
     private fun initYtDlp() {
+        youtubeCookiesFile = File(filesDir, "youtube-cookies.txt")
+            .takeIf { it.isFile && it.length() > 0L }
         try {
             YtDlp.init(applicationContext)
             ytDlpInitialized = true
-            status.text = "yt-dlp 已就绪，可解析 YouTube 和其他支持的网站。"
+            status.text = if (youtubeCookiesFile != null) {
+                "yt-dlp 已就绪，已载入本机 YouTube Cookie。"
+            } else {
+                "yt-dlp 已就绪，可解析 YouTube 和其他支持的网站。"
+            }
         } catch (e: YtDlpException) {
             ytDlpInitialized = false
             status.text = "yt-dlp 初始化失败：${e.message ?: "运行环境不可用"}"
