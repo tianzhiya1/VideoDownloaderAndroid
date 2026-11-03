@@ -229,7 +229,7 @@ class MainActivity : Activity() {
                 val valid = cookieFile.readLines().any {
                     it.startsWith("# Netscape HTTP Cookie File") ||
                     it.startsWith("# HTTP Cookie File") ||
-                    (it.isNotBlank() && !it.startsWith("#") && it.split("\\t").size >= 7)
+                    (it.isNotBlank() && !it.startsWith("#") && it.split("\t").size >= 7)
                 }
                 if (!valid) {
                     cookieFile.delete()
