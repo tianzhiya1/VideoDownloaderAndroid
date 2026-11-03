@@ -1,16 +1,18 @@
 # VideoDownloader for Windows
 
-Windows desktop companion to the Android app.
+Portable Windows desktop audio/video to MP3 converter.
 
 ## Features
-- Embedded Chromium-based browser (Qt WebEngine).
-- Detects media URLs requested by pages: MP4 and common video extensions, HLS M3U8, and DASH MPD.
-- Parses direct media URLs exposed in page HTML.
-- Resolves a current Bilibili MP4 URL when the public API allows it.
-- Select one candidate and use the single global button to view and copy its URL.
+- Embedded Chromium-based browser.
+- Detects common audio files (MP3, M4A, AAC, WAV, FLAC, OGG, OPUS, WebA), video files, HLS M3U8 and DASH MPD requests.
+- Scans direct media URLs exposed in page HTML.
+- Resolves a Bilibili MP4 URL when its public API allows it.
+- Select one candidate and use the single global button to save it as an MP3 file.
+- Extracts audio from supported video files and attempts HLS/DASH conversion.
+- Bundles FFmpeg through imageio-ffmpeg; no separate FFmpeg installation is required.
 - Does not automatically open external browsers.
 
-## Build locally
+## Run from source
 Requires 64-bit Windows and Python 3.11.
 
 ```powershell
@@ -19,13 +21,18 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-pip install pyinstaller==6.11.1
-pyinstaller --noconfirm --clean --windowed --name VideoDownloader main.py
+python main.py
 ```
 
-The executable and required Qt files are in `desktop/dist/VideoDownloader/`.
+## Build locally
+```powershell
+pip install pyinstaller==6.11.1
+pyinstaller --noconfirm --clean --windowed --name VideoDownloader --collect-all imageio_ffmpeg main.py
+```
+
+The executable and required Qt/FFmpeg files are in `desktop/dist/VideoDownloader/`.
 
 ## Limitations
-Detection depends on media URLs exposed by the page. Some dynamic players, blob-only sources, DRM-protected streams, login-gated media, anti-bot checks, and streams requiring special request headers may not work. This app does not bypass DRM, paywalls, login requirements, or other access controls.
+Conversion requires an accessible media URL and an audio track. Some sites require cookies, authorization, special request headers, or anti-bot checks that the app cannot reproduce. Blob-only sources and DRM-protected streams may not work. This app does not bypass DRM, paywalls, login requirements, or other access controls.
 
-Only download media you are authorized to download.
+Only save media you are authorized to download.
